@@ -32,12 +32,30 @@ IF ERRORLEVEL 1 (
     "%GH%" auth login --web
 )
 
-echo Creating release %TAG% on %OWNER%/%REPO%...
-"%GH%" release create %TAG% %ASSET% --title "%TITLE%" --notes-file RELEASE_NOTE.md --repo %OWNER%/%REPO%
+echo Checking for existing release %TAG% on %OWNER%/%REPO%...
+"%GH%" release view %TAG% --repo %OWNER%/%REPO% >nul 2>&1
 IF %ERRORLEVEL% EQU 0 (
-    echo Release created successfully.
+    echo Release %TAG% already exists. Updating release metadata and asset...
+    "%GH%" release edit %TAG% --title "%TITLE%" --notes-file RELEASE_NOTE.md --repo %OWNER%/%REPO%
+    IF %ERRORLEVEL% NEQ 0 (
+        echo Failed to update release metadata.
+        pause
+        exit /b 1
+    )
+    "%GH%" release upload %TAG% %ASSET% --clobber --repo %OWNER%/%REPO%
+    IF %ERRORLEVEL% EQU 0 (
+        echo Release updated successfully.
+    ) ELSE (
+        echo Release asset upload failed. Check asset path and GitHub permissions.
+    )
 ) ELSE (
-    echo Release creation failed. Check gh auth status or run: %GH% auth login --web
+    echo Creating release %TAG% on %OWNER%/%REPO%...
+    "%GH%" release create %TAG% %ASSET% --title "%TITLE%" --notes-file RELEASE_NOTE.md --repo %OWNER%/%REPO%
+    IF %ERRORLEVEL% EQU 0 (
+        echo Release created successfully.
+    ) ELSE (
+        echo Release creation failed. Check gh auth status or run: %GH% auth login --web
+    )
 )
 
 pause

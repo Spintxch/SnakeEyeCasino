@@ -270,9 +270,9 @@ SHOP_ITEMS = [
     {"id": "seven_charm", "tier": 2, "name": "Seven Charm", "price": 25, "description": "Slots only: increases seven symbol frequency."},
     {"id": "ace_sleeve", "tier": 2, "name": "Ace Sleeve", "price": 20, "description": "Blackjack only: aces appear more often in your draws."},
     {"id": "face_read", "tier": 2, "name": "Face Read Notes", "price": 20, "description": "Poker only: face cards appear more often in your hole cards."},
-    {"id": "custom_slot_focus", "tier": 3, "name": "Custom Slot Totem", "price": 35, "description": "Slots only: choose one symbol to appear more often."},
-    {"id": "custom_blackjack_focus", "tier": 3, "name": "Custom Blackjack Sigil", "price": 35, "description": "Blackjack only: choose one rank to appear more often in your draws."},
-    {"id": "custom_poker_focus", "tier": 3, "name": "Custom Poker Lens", "price": 35, "description": "Poker only: choose one rank to appear more often in your hole cards."},
+    {"id": "custom_slot_focus", "tier": 3, "name": "Slot Totem", "price": 35, "description": "Slots only: choose one symbol to appear more often."},
+    {"id": "custom_blackjack_focus", "tier": 3, "name": "Blackjack Sigil", "price": 35, "description": "Blackjack only: choose one rank to appear more often in your draws."},
+    {"id": "custom_poker_focus", "tier": 3, "name": "Poker Lens", "price": 35, "description": "Poker only: choose one rank to appear more often in your hole cards."},
 ]
 
 

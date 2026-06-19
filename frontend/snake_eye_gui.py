@@ -179,7 +179,11 @@ def set_status_message(window, message, is_error=False):
 def _set_card_row(window, keys, cards):
     for idx, key in enumerate(keys):
         if idx < len(cards):
-            window[key].update(bj_format_card(cards[idx]))
+            card_text = bj_format_card(cards[idx])
+            is_red = ("♥" in card_text) or ("♦" in card_text)
+            window[key].update(card_text)
+            window[key].update(background_color="#FFFFFF")
+            window[key].update(text_color=("#C62828" if is_red else "#111827"))
             window[key].update(visible=True)
         else:
             window[key].update("")
@@ -289,7 +293,6 @@ def update_main_metrics(window, session):
     bonus_lines = get_active_bonus_lines(session)
     window["-BONUS_LIST-"].update(values=bonus_lines)
     window["-BONUS_SECTION-"].update(visible=bool(bonus_lines))
-    window["-STATUS_CASH-"].update(format_money(session.cash_on_hand))
     if "-SHOP_DIGITAL-" in window.AllKeysDict:
         window["-SHOP_DIGITAL-"].update(format_money(session.digital_balance))
 
@@ -300,6 +303,8 @@ def set_view(window, view_key):
         window[key].update(visible=(key == view_key))
     if "-TOP_BACK_HUB-" in window.AllKeysDict:
         window["-TOP_BACK_HUB-"].update(visible=(view_key != "-VIEW_HUB-"))
+    if "-MONEY_CASH_FRAME-" in window.AllKeysDict:
+        window["-MONEY_CASH_FRAME-"].update(visible=(view_key != "-VIEW_SHOP-"))
 
     # Show win/loss feedback only inside the active game view.
     if view_key != "-VIEW_SLOTS-":
@@ -312,7 +317,8 @@ def set_view(window, view_key):
 
 def refresh_shop_list(window, session):
     items = get_shop_items()
-    session.shop_items_by_id = {item["id"]: item for item in items}
+    items_sorted = sorted(items, key=lambda x: (int(x.get("tier", 1)), x["name"]))
+    session.shop_table_items = items_sorted
 
     inventory = get_inventory(session)
     owned_count = {}
@@ -320,19 +326,16 @@ def refresh_shop_list(window, session):
         item_id = entry.get("id")
         owned_count[item_id] = owned_count.get(item_id, 0) + 1
 
-    for item in items:
-        key = ("SHOP_CARD", item["id"])
-        if key not in window.AllKeysDict:
-            continue
+    for item in items_sorted:
         tier = int(item.get("tier", 1))
         limit = item.get("purchase_limit")
         count = owned_count.get(item["id"], 0)
         limit_text = f"{count}/{limit}" if limit is not None else f"{count}/inf"
-        card_text = (
-            f"{item['name']}  |  ${item['price']}  |  Tier {tier}  |  Owned {limit_text}\n"
-            f"{item['description']}"
-        )
-        window[key].update(card_text)
+        window[("SHOP_COL_NAME", item["id"])].update(item["name"])
+        window[("SHOP_COL_PRICE", item["id"])].update(f"${item['price']}")
+        window[("SHOP_COL_TIER", item["id"])].update(f"Tier {tier}")
+        window[("SHOP_COL_OWNED", item["id"])].update(limit_text)
+        window[("SHOP_COL_DESC", item["id"])].update(item["description"])
 
 
 def refresh_inventory(window, session):
@@ -356,17 +359,17 @@ def refresh_inventory(window, session):
     has_bj_custom = "custom_blackjack_focus" in owned_ids
     has_poker_custom = "custom_poker_focus" in owned_ids
 
+    window["-INV_SLOT_ROW-"].update(visible=has_slot_custom)
     window["-INV_CUSTOM_SLOT-"].update(value=custom_settings["slot_symbol"], disabled=not has_slot_custom)
     window["-INV_APPLY_SLOT-"].update(disabled=not has_slot_custom)
-    window["-INV_SLOT_HINT-"].update("Unlocked" if has_slot_custom else "Locked: need Custom Slot Totem")
 
+    window["-INV_BJ_ROW-"].update(visible=has_bj_custom)
     window["-INV_CUSTOM_BJ-"].update(value=custom_settings["blackjack_rank"], disabled=not has_bj_custom)
     window["-INV_APPLY_BJ-"].update(disabled=not has_bj_custom)
-    window["-INV_BJ_HINT-"].update("Unlocked" if has_bj_custom else "Locked: need Custom Blackjack Sigil")
 
+    window["-INV_POKER_ROW-"].update(visible=has_poker_custom)
     window["-INV_CUSTOM_POKER-"].update(value=custom_settings["poker_rank"], disabled=not has_poker_custom)
     window["-INV_APPLY_POKER-"].update(disabled=not has_poker_custom)
-    window["-INV_POKER_HINT-"].update("Unlocked" if has_poker_custom else "Locked: need Custom Poker Lens")
 
 
 def refresh_slots(window, session):
@@ -459,27 +462,52 @@ def main():
     custom_options = get_custom_focus_options()
     custom_settings = get_custom_focus_settings(session)
 
+    sg.set_options(font=("Segoe UI", 12), element_padding=(8, 8), button_element_size=(14, 2))
+
     shop_items = sorted(get_shop_items(), key=lambda x: (int(x.get("tier", 1)), x["name"]))
-    shop_cards = []
+    shop_card_rows = []
     for item in shop_items:
-        limit_text = f"Limit {item['purchase_limit']}" if item.get("purchase_limit") is not None else "No limit"
-        card_text = f"{item['name']}  |  ${item['price']}  |  Tier {item.get('tier', 1)}  |  {limit_text}\n{item['description']}"
-        shop_cards.append([sg.Button(card_text, key=("SHOP_CARD", item["id"]), size=(85, 2), button_color=("#111827", "#DDE6F5"))])
+        row = [
+            sg.Frame(
+                "",
+                [[
+                    sg.Text("", key=("SHOP_COL_NAME", item["id"]), size=(20, 1), justification="l", font=("Segoe UI", 12, "bold")),
+                    sg.VSeparator(),
+                    sg.Text("", key=("SHOP_COL_PRICE", item["id"]), size=(10, 1), justification="c"),
+                    sg.VSeparator(),
+                    sg.Text("", key=("SHOP_COL_TIER", item["id"]), size=(10, 1), justification="c"),
+                    sg.VSeparator(),
+                    sg.Text("", key=("SHOP_COL_OWNED", item["id"]), size=(12, 1), justification="c"),
+                    sg.VSeparator(),
+                    sg.Text("", key=("SHOP_COL_DESC", item["id"]), size=(52, 1), justification="l"),
+                    sg.Push(),
+                    sg.Button("Buy", key=("SHOP_BUY", item["id"]), size=(8, 1)),
+                ]],
+                expand_x=True,
+                border_width=1,
+                relief=sg.RELIEF_RIDGE,
+                pad=(0, 4),
+            )
+        ]
+        shop_card_rows.append(row)
 
     layout = [
         [
-            sg.Button("Back to Hub", key="-TOP_BACK_HUB-", visible=False),
-            sg.Button("Shop", key="-TOP_SHOP-"),
-            sg.Button("Cashier's Cage", key="-TOP_CASHIER-"),
+            sg.Column([[sg.Button("Back to Hub", key="-TOP_BACK_HUB-", visible=False, size=(14, 2))]], element_justification="l", pad=(0, 0)),
             sg.Push(),
-            sg.Button("Toggle Fullscreen", key="-TOGGLE_FS-"),
-            sg.Button("Quit", button_color=("#FFFFFF", "#D32F2F")),
+            sg.Column([[sg.Button("Shop", key="-TOP_SHOP-", size=(14, 2)), sg.Button("Cashier's Cage", key="-TOP_CASHIER-", size=(16, 2)), sg.Button("Inventory", key="-TOP_INV-", size=(14, 2))]], element_justification="c", pad=(0, 0)),
+            sg.Push(),
+            sg.Column([[sg.Button("Toggle Fullscreen", key="-TOGGLE_FS-", size=(16, 2)), sg.Button("Quit", size=(10, 2), button_color=("#FFFFFF", "#D32F2F"))]], element_justification="r", pad=(0, 0)),
         ],
         [
-            sg.Text("Digital:", text_color="#FFD54F"), sg.Text(format_money(session.digital_balance), key="-DIGITAL-"),
-            sg.Text("   Cash:", text_color="#FFD54F"), sg.Text(format_money(session.cash_on_hand), key="-CASH-"),
-            sg.Text("   Total:", text_color="#FFD54F"), sg.Text(format_money(get_total_value(session)), key="-TOTAL-"),
-            sg.Text("   Luck:", text_color="#FFD54F"), sg.Text(str(get_luck(session)), key="-LUCK-"),
+            sg.Column([
+                [
+                    sg.Frame("Digital", [[sg.Text(format_money(session.digital_balance), key="-DIGITAL-", font=(None, 14, "bold"), text_color="#FFD54F")]], pad=(0, 0)),
+                    sg.Frame("Cash On Hand", [[sg.Text(format_money(session.cash_on_hand), key="-CASH-", font=(None, 14, "bold"), text_color="#FFD54F")]], key="-MONEY_CASH_FRAME-", pad=(0, 0)),
+                    sg.Frame("Total", [[sg.Text(format_money(get_total_value(session)), key="-TOTAL-", font=(None, 14, "bold"), text_color="#FFD54F")]], pad=(0, 0)),
+                    sg.Frame("Luck", [[sg.Text(str(get_luck(session)), key="-LUCK-", font=(None, 14, "bold"), text_color="#FFD54F")]], pad=(0, 0)),
+                ]
+            ], expand_x=True, element_justification="l", pad=(0, 0)),
         ],
         [sg.Text("", key="-RESULT_BANNER-", size=(1, 1), visible=False)],
         [sg.pin(sg.Column([[sg.Text("Error:"), sg.Input("", key="-STATUS_MSG-", size=(100, 1), readonly=True), sg.Button("Copy", key="-COPY_STATUS-")]], key="-STATUS_ROW-", visible=False))],
@@ -488,13 +516,12 @@ def main():
             sg.Push(),
             sg.pin(sg.Column(
                 [
-                    [sg.Text("Welcome to Snake Eye Casino", font=(None, 20, "bold"))],
-                    [sg.Text("Select where you want to go from the hub.")],
+                    [sg.Text("Welcome to Snake Eye Casino", font=(None, 24, "bold"), justification="center", expand_x=True)],
+                    [sg.Text("Select where you want to go from the hub.", justification="center", expand_x=True)],
                     [
-                        sg.Button("Open Slots", key="-HUB_SLOTS-"),
-                        sg.Button("Open Inventory", key="-HUB_INV-"),
-                        sg.Button("Open Blackjack", key="-HUB_BJ-"),
-                        sg.Button("Open Poker", key="-HUB_POKER-"),
+                        sg.Button("Open Slots", key="-HUB_SLOTS-", size=(18, 2)),
+                        sg.Button("Open Blackjack", key="-HUB_BJ-", size=(18, 2)),
+                        sg.Button("Open Poker", key="-HUB_POKER-", size=(18, 2)),
                     ],
                 ],
                 key="-VIEW_HUB-",
@@ -512,8 +539,8 @@ def main():
                 [
                     [sg.Text("Shop (Digital Currency Only)", font=(None, 16, "bold"))],
                     [sg.Text("Digital available:"), sg.Text(format_money(session.digital_balance), key="-SHOP_DIGITAL-", text_color="#FFD54F")],
-                    [sg.Text("Click an item card to buy", text_color="#8AA0BF")],
-                    [sg.Column(shop_cards, key="-SHOP_CARDS_COL-", scrollable=False, size=(1100, 520), expand_x=True, expand_y=True, element_justification="c")],
+                    [sg.Text("Each item is a full-width card split into columns", text_color="#8AA0BF")],
+                    [sg.Column(shop_card_rows, key="-SHOP_CARD_ROWS-", scrollable=True, vertical_scroll_only=True, expand_x=True, expand_y=True, size=(1250, 520), element_justification="l")],
                 ],
                 key="-VIEW_SHOP-",
                 visible=False,
@@ -540,25 +567,10 @@ def main():
                             num_rows=10,
                         )
                     ],
-                    [sg.Text("Tier 3 Custom Focus", font=(None, 14, "bold"))],
-                    [
-                        sg.Text("Slots symbol:"),
-                        sg.Combo(custom_options["slots_symbols"], default_value=custom_settings["slot_symbol"], key="-INV_CUSTOM_SLOT-", readonly=True, size=(14, 1)),
-                        sg.Button("Apply", key="-INV_APPLY_SLOT-"),
-                        sg.Text("", key="-INV_SLOT_HINT-", size=(35, 1)),
-                    ],
-                    [
-                        sg.Text("Blackjack rank:"),
-                        sg.Combo(custom_options["card_ranks"], default_value=custom_settings["blackjack_rank"], key="-INV_CUSTOM_BJ-", readonly=True, size=(14, 1)),
-                        sg.Button("Apply", key="-INV_APPLY_BJ-"),
-                        sg.Text("", key="-INV_BJ_HINT-", size=(35, 1)),
-                    ],
-                    [
-                        sg.Text("Poker rank:"),
-                        sg.Combo(custom_options["card_ranks"], default_value=custom_settings["poker_rank"], key="-INV_CUSTOM_POKER-", readonly=True, size=(14, 1)),
-                        sg.Button("Apply", key="-INV_APPLY_POKER-"),
-                        sg.Text("", key="-INV_POKER_HINT-", size=(35, 1)),
-                    ],
+                    [sg.Text("Tier 3 Focus (only appears for owned custom items)", font=(None, 14, "bold"))],
+                    [sg.pin(sg.Column([[sg.Text("Custom Slot Totem"), sg.Combo(custom_options["slots_symbols"], default_value=custom_settings["slot_symbol"], key="-INV_CUSTOM_SLOT-", readonly=True, size=(14, 1)), sg.Button("Apply", key="-INV_APPLY_SLOT-")]], key="-INV_SLOT_ROW-", visible=False))],
+                    [sg.pin(sg.Column([[sg.Text("Custom Blackjack Sigil"), sg.Combo(custom_options["card_ranks"], default_value=custom_settings["blackjack_rank"], key="-INV_CUSTOM_BJ-", readonly=True, size=(14, 1)), sg.Button("Apply", key="-INV_APPLY_BJ-")]], key="-INV_BJ_ROW-", visible=False))],
+                    [sg.pin(sg.Column([[sg.Text("Custom Poker Lens"), sg.Combo(custom_options["card_ranks"], default_value=custom_settings["poker_rank"], key="-INV_CUSTOM_POKER-", readonly=True, size=(14, 1)), sg.Button("Apply", key="-INV_APPLY_POKER-")]], key="-INV_POKER_ROW-", visible=False))],
                 ],
                 key="-VIEW_INVENTORY-",
                 visible=False,
@@ -599,11 +611,11 @@ def main():
             sg.Push(),
             sg.pin(sg.Column(
                 [
-                    [sg.Text("Blackjack", font=(None, 16, "bold"))],
+                    [sg.Text("Blackjack", font=(None, 18, "bold"))],
                     [sg.Text("Dealer")],
-                    [sg.Text("", key="-BJ_DEALER_C1-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-BJ_DEALER_C2-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-BJ_DEALER_C3-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-BJ_DEALER_C4-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-BJ_DEALER_C5-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center")],
+                    [sg.Text("", key="-BJ_DEALER_C1-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-BJ_DEALER_C2-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-BJ_DEALER_C3-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-BJ_DEALER_C4-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-BJ_DEALER_C5-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827")],
                     [sg.Text("Player")],
-                    [sg.Text("", key="-BJ_PLAYER_C1-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-BJ_PLAYER_C2-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-BJ_PLAYER_C3-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-BJ_PLAYER_C4-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-BJ_PLAYER_C5-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center")],
+                    [sg.Text("", key="-BJ_PLAYER_C1-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-BJ_PLAYER_C2-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-BJ_PLAYER_C3-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-BJ_PLAYER_C4-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-BJ_PLAYER_C5-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827")],
                     [sg.Text("", key="-BJ_MSG_LINE-", size=(90, 2), text_color="#DDE6F5")],
                     [sg.Text("Bet amount:"), sg.Input(default_text=str(session.saved_bj_bet), key="-BJ_BET-", size=(10, 1)), sg.Button("Deal", key="-BJ_DEAL-")],
                     [sg.Button("Hit", key="-BJ_HIT-"), sg.Button("Stand", key="-BJ_STAND-"), sg.Button("Double Down", key="-BJ_DOUBLE-"), sg.Button("Split", key="-BJ_SPLIT-"), sg.Button("Play Again", key="-BJ_RESET-")],
@@ -621,11 +633,11 @@ def main():
             sg.Push(),
             sg.pin(sg.Column(
                 [
-                    [sg.Text("Texas Hold'em", font=(None, 16, "bold"))],
+                    [sg.Text("Texas Hold'em", font=(None, 18, "bold"))],
                     [sg.Text("Your Hole Cards")],
-                    [sg.Text("", key="-POKER_HOLE_C1-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-POKER_HOLE_C2-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center")],
+                    [sg.Text("", key="-POKER_HOLE_C1-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-POKER_HOLE_C2-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827")],
                     [sg.Text("Community Cards")],
-                    [sg.Text("", key="-POKER_COMM_C1-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-POKER_COMM_C2-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-POKER_COMM_C3-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-POKER_COMM_C4-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center"), sg.Text("", key="-POKER_COMM_C5-", relief=sg.RELIEF_RIDGE, size=(5, 2), justification="center")],
+                    [sg.Text("", key="-POKER_COMM_C1-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-POKER_COMM_C2-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-POKER_COMM_C3-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-POKER_COMM_C4-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827"), sg.Text("", key="-POKER_COMM_C5-", relief=sg.RELIEF_RAISED, size=(7, 4), justification="center", font=("Segoe UI", 13, "bold"), background_color="#FFFFFF", text_color="#111827")],
                     [sg.Text("", key="-POKER_MSG_LINE-", size=(90, 3), text_color="#DDE6F5")],
                     [sg.Text("Bet amount (0 to check/call):"), sg.Input(default_text=str(session.saved_he_ante), key="-POKER_BET-", size=(10, 1)), sg.Button("Action", key="-POKER_ACTION-")],
                     [sg.Button("Fold", key="-POKER_FOLD-"), sg.Button("Next Hand", key="-POKER_RESET-")],
@@ -652,14 +664,6 @@ def main():
                 expand_y=True,
                 element_justification="c",
             )),
-            sg.Push(),
-        ],
-        [
-            sg.Push(),
-            sg.Frame(
-                "Cash On Hand",
-                [[sg.Text(format_money(session.cash_on_hand), key="-STATUS_CASH-", font=(None, 20, "bold"), text_color="#FFD54F")]],
-            ),
             sg.Push(),
         ],
         [
@@ -721,6 +725,9 @@ def main():
             refresh_shop_list(window, session)
         elif event == "-TOP_CASHIER-":
             set_view(window, "-VIEW_CASHIER-")
+        elif event == "-TOP_INV-":
+            set_view(window, "-VIEW_INVENTORY-")
+            refresh_inventory(window, session)
         elif event == "-HUB_SLOTS-":
             set_view(window, "-VIEW_SLOTS-")
             refresh_slots(window, session)
@@ -757,7 +764,7 @@ def main():
             set_status_message(window, session.wallet_message, is_error=(not ok))
             update_main_metrics(window, session)
 
-        elif isinstance(event, tuple) and event[0] == "SHOP_CARD":
+        elif isinstance(event, tuple) and event[0] == "SHOP_BUY":
             _, item_id = event
             ok, msg = buy_item(session, item_id)
             set_status_message(window, msg, is_error=(not ok))

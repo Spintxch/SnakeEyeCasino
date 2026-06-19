@@ -4,9 +4,9 @@ REM Usage: run this script locally where `gh` is installed and you're authentica
 
 SET OWNER=Spintxch
 SET REPO=SnakeEyeCasino
-SET TAG=v0.1.0
-SET ASSET=release\snake_eye_gui-0.1.0.exe
-SET TITLE=v0.1.0
+SET TAG=v0.1.1
+SET ASSET=release\snake_eye_gui-0.1.1.exe
+SET TITLE=v0.1.1
 
 REM Prefer gh on PATH, otherwise fall back to known install location
 SET GH=gh

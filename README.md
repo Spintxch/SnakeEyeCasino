@@ -4,7 +4,7 @@ This folder contains a PySimpleGUI frontend (`frontend/snake_eye_gui.py`) and ba
 
 Version
 
-- `snake_eye_casino.__version__` = `0.1.0`
+- `snake_eye_casino.__version__` = `0.1.1`
 
 Quick start
 

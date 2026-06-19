@@ -5,7 +5,7 @@ REM Run this from the root of the snake_eye_casino package folder.
 python -m pip install -r requirements.txt pyinstaller
 python -m PyInstaller --clean --noconfirm snake_eye_gui.spec
 
-set VERSION=0.1.0
+set VERSION=0.1.1
 if exist dist\snake_eye_gui.exe (
     copy /Y dist\snake_eye_gui.exe release\snake_eye_gui-%VERSION%.exe
     set "EXE_PATH=%CD%\release\snake_eye_gui-%VERSION%.exe"

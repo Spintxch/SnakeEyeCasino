@@ -16,6 +16,38 @@ def deal_cards(deck, num=1):
     """Pops a specified number of cards off the deck."""
     return [deck.pop() for _ in range(num)]
 
+
+def deal_biased_cards(deck, num=1, luck=0, favor_high=True, preferred_ranks=None):
+    """Deal cards using luck-based candidate selection.
+
+    This gives the caller a way to slightly improve or reduce expected hand
+    strength by selecting from multiple random candidates per draw.
+    """
+    dealt = []
+    luck = max(0, int(luck))
+    preferred = set(preferred_ranks or [])
+
+    for _ in range(num):
+        if not deck:
+            break
+        if luck == 0 or len(deck) == 1:
+            dealt.append(deck.pop())
+            continue
+
+        # 0-100 luck scale: reaches max candidate pool near 100 luck.
+        candidate_count = min(len(deck), 1 + min(4, luck // 25))
+        candidate_indexes = random.sample(range(len(deck)), k=candidate_count)
+        def _score(card):
+            return card["value"] + (3 if card["rank"] in preferred else 0)
+
+        if favor_high:
+            chosen_index = max(candidate_indexes, key=lambda i: _score(deck[i]))
+        else:
+            chosen_index = min(candidate_indexes, key=lambda i: _score(deck[i]))
+        dealt.append(deck.pop(chosen_index))
+
+    return dealt
+
 def evaluate_5_card_hand(hand):
     """
     Scores a 5-card hand. 

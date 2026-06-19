@@ -42,10 +42,30 @@ slotMachineVariables = list(SYMBOL_WEIGHTS.keys())
 slotWeights = list(SYMBOL_WEIGHTS.values())
 pityWeights = list(PITY_WEIGHTS.values())
 
-def spin_slots(consecutive_losses=0):
-    """Return the three slot wheels. Increases win chance based on consecutive losses."""
-    # Each consecutive loss adds a 10% invisible chance to force a win
-    pity_chance = consecutive_losses * 0.10 
+
+def _build_luck_weights(luck=0, symbol_multipliers=None):
+    """Blend normal and pity weights so luck always improves spin odds."""
+    luck = max(0, int(luck))
+    # At luck 100, spins use 50% of the pity profile even without pity proc.
+    blend = min(0.5, luck * 0.005)
+    blended = []
+    for normal, pity in zip(slotWeights, pityWeights):
+        value = normal + (pity - normal) * blend
+        blended.append(max(0.1, value))
+
+    if symbol_multipliers:
+        for idx, symbol in enumerate(slotMachineVariables):
+            mult = float(symbol_multipliers.get(symbol, 1.0))
+            blended[idx] = max(0.1, blended[idx] * max(0.1, mult))
+
+    return blended
+
+def spin_slots(consecutive_losses=0, luck=0, symbol_multipliers=None):
+    """Return slot wheels using pity + luck driven win assistance."""
+    luck = max(0, int(luck))
+
+    # Existing pity system plus luck contribution on a 0-100 scale.
+    pity_chance = min(0.85, consecutive_losses * 0.10 + luck * 0.002)
     
     # If the hidden pity roll succeeds, use the LUCKY WEIGHTS to generate the win!
     if random.random() < pity_chance:
@@ -58,10 +78,12 @@ def spin_slots(consecutive_losses=0):
             if len(check_win(wheels)) > 0:
                 return wheels
 
-    # Otherwise, perform a completely normal, standard spin
-    wheel_one = random.choices(slotMachineVariables, weights=slotWeights, k=3)
-    wheel_two = random.choices(slotMachineVariables, weights=slotWeights, k=3)
-    wheel_three = random.choices(slotMachineVariables, weights=slotWeights, k=3)
+    # Luck now always improves the base roll profile.
+    active_weights = _build_luck_weights(luck, symbol_multipliers=symbol_multipliers)
+
+    wheel_one = random.choices(slotMachineVariables, weights=active_weights, k=3)
+    wheel_two = random.choices(slotMachineVariables, weights=active_weights, k=3)
+    wheel_three = random.choices(slotMachineVariables, weights=active_weights, k=3)
     return [wheel_one, wheel_two, wheel_three]
 
 def is_three_of_a_kind(a, b, c):

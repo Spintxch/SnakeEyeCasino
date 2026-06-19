@@ -16,6 +16,37 @@ def deal_card(deck):
     """Pops a card off the top of the deck."""
     return deck.pop()
 
+
+def deal_biased_card(deck, luck=0, favor_high=True, preferred_ranks=None):
+    """Deal a card with luck-based bias.
+
+    Higher luck increases how many random candidates are considered.
+    If `favor_high` is True, the highest-value candidate is chosen.
+    """
+    if not deck:
+        raise IndexError("Cannot deal from an empty deck")
+
+    luck = max(0, int(luck))
+    if luck == 0 or len(deck) == 1:
+        return deal_card(deck)
+
+    # 0-100 luck scale: reaches max candidate pool near 100 luck.
+    candidate_count = min(len(deck), 1 + min(5, luck // 20))
+    candidate_indexes = random.sample(range(len(deck)), k=candidate_count)
+
+    preferred = set(preferred_ranks or [])
+
+    def _score(card):
+        # Preferred ranks get a boost, then card value breaks ties.
+        return card["value"] + (4 if card["rank"] in preferred else 0)
+
+    if favor_high:
+        chosen_index = max(candidate_indexes, key=lambda i: _score(deck[i]))
+    else:
+        chosen_index = min(candidate_indexes, key=lambda i: _score(deck[i]))
+
+    return deck.pop(chosen_index)
+
 def calculate_hand_value(hand):
     """Calculates the optimal score of a hand, handling Aces appropriately."""
     value = sum(card['value'] for card in hand)

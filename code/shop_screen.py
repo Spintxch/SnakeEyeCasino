@@ -1,9 +1,18 @@
 import pygame
 
+from ui_mouse import get_position
 from shop import (
     AVAILABLE_POWERUPS,
     ShopGame,
     total_loan_balance,
+)
+from ui_scaling import (
+    blit_center,
+    blit_midleft,
+    draw_line,
+    draw_rect,
+    make_font,
+    set_clip,
 )
 
 
@@ -26,11 +35,11 @@ class ShopScreen:
         self.quantity_text = "1"
         self.quantity_active = False
 
-        self.title_font = pygame.font.Font(None, 32)
-        self.body_font = pygame.font.Font(None, 23)
-        self.small_font = pygame.font.Font(None, 20)
-        self.balance_font = pygame.font.SysFont("Consolas", 26)
-        self.button_font = pygame.font.Font(None, 28)
+        self.title_font = make_font(None, 32)
+        self.body_font = make_font(None, 23)
+        self.small_font = make_font(None, 20)
+        self.balance_font = make_font("Consolas", 26)
+        self.button_font = make_font(None, 28)
 
     def get_item_layout(self):
         sections = []
@@ -79,23 +88,55 @@ class ShopScreen:
                         self.item_viewport.width - 18,
                         112,
                     )
-                    quantity_rect = pygame.Rect(
-                        details_rect.x + 14,
-                        details_rect.y + 66,
-                        110,
-                        36,
-                    )
-                    buy_rect = pygame.Rect(
-                        details_rect.right - 124,
-                        details_rect.y + 66,
-                        110,
-                        36,
-                    )
+                    if not self.is_single_purchase_item(name):
+                        quantity_rect = pygame.Rect(
+                            details_rect.x + 14,
+                            details_rect.y + 66,
+                            110,
+                            36,
+                        )
+                        buy_rect = pygame.Rect(
+                            details_rect.right - 124,
+                            details_rect.y + 66,
+                            110,
+                            36,
+                        )
+                    else:
+                        buy_rect = pygame.Rect(
+                            details_rect.centerx - 55,
+                            details_rect.y + 66,
+                            110,
+                            36,
+                        )
                     y += 120
 
                 layout.append((row, name, details_rect, quantity_rect, buy_rect))
 
         return layout, content_height, max_scroll, self.item_viewport, category_headers
+
+    @staticmethod
+    def is_single_purchase_item(name):
+        details = AVAILABLE_POWERUPS[name]
+        return (
+            details["type"] == "perma"
+            and details.get("max_owned", 1) == 1
+        )
+
+    def owned_count(self, name):
+        inventory_key = (
+            "perma_powerups"
+            if AVAILABLE_POWERUPS[name]["type"] == "perma"
+            else "temp_powerups"
+        )
+        return self.player[inventory_key].count(name)
+
+    def is_at_purchase_limit(self, name):
+        details = AVAILABLE_POWERUPS[name]
+        maximum = details.get(
+            "max_owned",
+            1 if details["type"] == "perma" else None,
+        )
+        return maximum is not None and self.owned_count(name) >= maximum
 
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
@@ -118,9 +159,14 @@ class ShopScreen:
                 return
 
         if event.type == pygame.MOUSEWHEEL:
-            if not self.item_viewport.collidepoint(pygame.mouse.get_pos()):
+            mouse_position = getattr(event, "pos", pygame.mouse.get_pos())
+            if not self.item_viewport.collidepoint(mouse_position):
                 return
-            self.item_scroll -= event.y * 35
+            _, _, max_scroll, _, _ = self.get_item_layout()
+            self.item_scroll = max(
+                0,
+                min(max_scroll, self.item_scroll - event.y * 35),
+            )
             self.get_item_layout()
             return
 
@@ -136,7 +182,10 @@ class ShopScreen:
             if selected_layout:
                 _, _, _, quantity_rect, buy_rect = selected_layout
 
-                if quantity_rect.collidepoint(event.pos):
+                if (
+                    quantity_rect is not None
+                    and quantity_rect.collidepoint(event.pos)
+                ):
                     if not self.quantity_active:
                         self.quantity_text = ""
                     self.quantity_active = True
@@ -145,6 +194,12 @@ class ShopScreen:
 
                 if buy_rect.collidepoint(event.pos):
                     self.quantity_active = False
+                    if self.is_at_purchase_limit(self.selected_item):
+                        self.message = (
+                            f"You already own the maximum "
+                            f"{self.selected_item}."
+                        )
+                        return
                     self.buy_selected_item()
                     return
 
@@ -217,9 +272,19 @@ class ShopScreen:
             return
 
         try:
-            quantity = int(self.quantity_text)
+            quantity = (
+                1
+                if self.is_single_purchase_item(self.selected_item)
+                else int(self.quantity_text)
+            )
         except ValueError:
             self.message = "Enter a whole-number quantity."
+            return
+
+        if self.is_at_purchase_limit(self.selected_item):
+            self.message = (
+                f"You already own the maximum {self.selected_item}."
+            )
             return
 
         try:
@@ -241,7 +306,7 @@ class ShopScreen:
             True,
             (255, 255, 255),
         )
-        screen.blit(balance, balance.get_rect(center=(450, 110)))
+        blit_center(screen, balance, (450, 110))
 
         self.draw_text(screen, "Power-ups", self.title_font, (285, 125))
 
@@ -262,7 +327,7 @@ class ShopScreen:
         )
 
         input_color = (255, 230, 150) if self.amount_active else (245, 235, 205)
-        pygame.draw.rect(screen, input_color, self.amount_box, border_radius=8)
+        draw_rect(screen, input_color, self.amount_box, border_radius=8)
         self.draw_input_text(
             screen,
             self.amount_box,
@@ -275,38 +340,62 @@ class ShopScreen:
         draw_button("Borrow", self.loan_button)
         draw_button("Repay", self.repay_button)
 
-        self.draw_text(
-            screen,
-            f"Temporary: {', '.join(self.player['temp_powerups']) or 'None'}",
-            self.small_font,
-            (700, 410),
-        )
-        self.draw_text(
-            screen,
-            f"Permanent: {', '.join(self.player['perma_powerups']) or 'None'}",
-            self.small_font,
-            (700, 445),
-        )
+        self.draw_owned_items(screen)
         self.draw_text(screen, self.message, self.small_font, (450, 565))
+
+    def draw_owned_items(self, screen):
+        panel = pygame.Rect(570, 380, 300, 160)
+        draw_rect(screen, (20, 53, 48), panel, border_radius=8)
+        draw_rect(screen, (90, 130, 95), panel, 1, border_radius=8)
+        self.draw_text(
+            screen,
+            "Owned Power-ups",
+            self.body_font,
+            (panel.centerx, panel.y + 17),
+        )
+
+        columns = (
+            ("Temporary", self.player["temp_powerups"], 580),
+            ("Permanent", self.player["perma_powerups"], 728),
+        )
+        for title, inventory, x in columns:
+            heading = self.small_font.render(title, True, (230, 195, 110))
+            blit_midleft(screen, heading, (x, panel.y + 39))
+            counts = {}
+            for item in inventory:
+                counts[item] = counts.get(item, 0) + 1
+
+            for row_index, (item, quantity) in enumerate(counts.items()):
+                y = panel.y + 62 + row_index * 18
+                if y > panel.bottom - 8:
+                    break
+                label = self.small_font.render(item, True, (245, 245, 235))
+                blit_midleft(screen, label, (x, y))
+                quantity_label = self.small_font.render(
+                    str(quantity),
+                    True,
+                    (245, 245, 235),
+                )
+                blit_center(screen, quantity_label, (x + 132, y))
 
     def draw_powerups(self, screen):
         layout, content_height, max_scroll, viewport, headers = (
             self.get_item_layout()
         )
         old_clip = screen.get_clip()
-        screen.set_clip(viewport)
-        mouse_position = pygame.mouse.get_pos()
+        set_clip(screen, viewport)
+        mouse_position = get_position()
 
         for y, title in headers:
             header_rect = pygame.Rect(viewport.x, y, viewport.width - 10, 26)
-            pygame.draw.rect(
+            draw_rect(
                 screen,
                 (30, 95, 70),
                 header_rect,
                 border_radius=5,
             )
             label = self.body_font.render(title, True, (255, 255, 255))
-            screen.blit(label, label.get_rect(midleft=(header_rect.x + 9, y + 13)))
+            blit_midleft(screen, label, (header_rect.x + 9, y + 13))
 
         for row, name, details_rect, quantity_rect, buy_rect in layout:
             if not viewport.colliderect(row):
@@ -319,7 +408,7 @@ class ShopScreen:
                 if hovered or selected
                 else (205, 160, 65)
             )
-            pygame.draw.rect(screen, row_color, row, border_radius=6)
+            draw_rect(screen, row_color, row, border_radius=6)
 
             details = AVAILABLE_POWERUPS[name]
             inventory_key = (
@@ -333,12 +422,12 @@ class ShopScreen:
                 True,
                 (30, 25, 18),
             )
-            screen.blit(label, label.get_rect(midleft=(row.x + 7, row.centery)))
+            blit_midleft(screen, label, (row.x + 7, row.centery))
 
             if details_rect is None:
                 continue
 
-            pygame.draw.rect(
+            draw_rect(
                 screen,
                 (30, 75, 60),
                 details_rect,
@@ -356,26 +445,32 @@ class ShopScreen:
                 ),
             )
 
-            input_color = (
-                (255, 230, 150)
-                if self.quantity_active
-                else (245, 235, 205)
-            )
-            pygame.draw.rect(
+            if quantity_rect is not None:
+                input_color = (
+                    (255, 230, 150)
+                    if self.quantity_active
+                    else (245, 235, 205)
+                )
+                draw_rect(
+                    screen,
+                    input_color,
+                    quantity_rect,
+                    border_radius=6,
+                )
+                self.draw_input_text(
+                    screen,
+                    quantity_rect,
+                    self.quantity_text,
+                    self.quantity_active,
+                    self.body_font,
+                    "Qty",
+                )
+            self.draw_local_button(
                 screen,
-                input_color,
-                quantity_rect,
-                border_radius=6,
+                "Buy",
+                buy_rect,
+                enabled=not self.is_at_purchase_limit(name),
             )
-            self.draw_input_text(
-                screen,
-                quantity_rect,
-                self.quantity_text,
-                self.quantity_active,
-                self.body_font,
-                "Qty",
-            )
-            self.draw_local_button(screen, "Buy", buy_rect)
 
         screen.set_clip(old_clip)
 
@@ -394,8 +489,8 @@ class ShopScreen:
                 (self.item_scroll / max_scroll)
                 * (viewport.height - thumb_height)
             )
-            pygame.draw.rect(screen, (80, 80, 80), track, border_radius=3)
-            pygame.draw.rect(
+            draw_rect(screen, (80, 80, 80), track, border_radius=3)
+            draw_rect(
                 screen,
                 (230, 195, 110),
                 pygame.Rect(
@@ -407,28 +502,31 @@ class ShopScreen:
                 border_radius=3,
             )
 
-    def draw_local_button(self, screen, text, rect):
-        color = (
-            (235, 195, 95)
-            if rect.collidepoint(pygame.mouse.get_pos())
-            else (205, 160, 65)
-        )
-        pygame.draw.rect(screen, color, rect, border_radius=8)
-        label = self.button_font.render(text, True, (30, 25, 18))
-        screen.blit(label, label.get_rect(center=rect.center))
+    def draw_local_button(self, screen, text, rect, enabled=True):
+        if not enabled:
+            color = (105, 105, 105)
+            text_color = (175, 175, 175)
+        elif rect.collidepoint(get_position()):
+            color = (235, 195, 95)
+            text_color = (30, 25, 18)
+        else:
+            color = (205, 160, 65)
+            text_color = (30, 25, 18)
+        draw_rect(screen, color, rect, border_radius=8)
+        label = self.button_font.render(text, True, text_color)
+        blit_center(screen, label, rect.center)
 
     def draw_input_text(self, screen, rect, value, active, font, placeholder):
         shown_text = value or ("" if active else placeholder)
         if shown_text:
             label = font.render(shown_text, True, (30, 25, 18))
-            label_rect = label.get_rect(center=rect.center)
-            screen.blit(label, label_rect)
-            cursor_x = label_rect.right + 3
+            blit_center(screen, label, rect.center)
+            cursor_x = rect.centerx + font.size(shown_text)[0] // 2 + 3
         else:
             cursor_x = rect.centerx
 
         if active and (pygame.time.get_ticks() // 500) % 2 == 0:
-            pygame.draw.line(
+            draw_line(
                 screen,
                 (30, 25, 18),
                 (cursor_x, rect.y + 9),
@@ -455,10 +553,10 @@ class ShopScreen:
         y = rect.y
         for line in lines:
             rendered = font.render(line, True, (255, 255, 255))
-            screen.blit(rendered, rendered.get_rect(centerx=rect.centerx, y=y))
+            blit_center(screen, rendered, (rect.centerx, y + font.get_linesize() // 2))
             y += font.get_linesize()
 
     @staticmethod
     def draw_text(screen, text, font, center):
         label = font.render(text, True, (255, 255, 255))
-        screen.blit(label, label.get_rect(center=center))
+        blit_center(screen, label, center)

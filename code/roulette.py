@@ -241,13 +241,37 @@ class RouletteGame:
         self.player = player
         self.player.setdefault("temp_powerups", [])
         self.last_spin = None
+        self.pending_spin = None
         self.message = "Choose a bet type and amount."
 
     @property
     def chips(self):
         return self.player["chips"]
 
-    def spin(self, bet, bet_type, location):
+    def spin(
+        self,
+        bet,
+        bet_type,
+        location,
+        use_lucky_marble=True,
+    ):
+        self.start_spin(
+            bet,
+            bet_type,
+            location,
+            use_lucky_marble=use_lucky_marble,
+        )
+        return self.finish_spin()
+
+    def start_spin(
+        self,
+        bet,
+        bet_type,
+        location,
+        use_lucky_marble=True,
+    ):
+        if self.pending_spin is not None:
+            raise RuntimeError("The roulette wheel is already spinning.")
         if not isinstance(bet, int) or isinstance(bet, bool):
             raise ValueError("Bet must be a whole number.")
         if not 1 <= bet <= self.chips:
@@ -267,14 +291,36 @@ class RouletteGame:
             result = random.choice(ROULETTE_NUMBERS)
 
         won = is_winning_spin(bet_type, location, result)
-        if not won and "Lucky Marble" in self.player["temp_powerups"]:
+        if (
+            use_lucky_marble
+            and not won
+            and "Lucky Marble" in self.player["temp_powerups"]
+        ):
             self.player["temp_powerups"].remove("Lucky Marble")
             result = random.choice(ROULETTE_NUMBERS)
             won = is_winning_spin(bet_type, location, result)
 
+        self.pending_spin = {
+            "bet": bet,
+            "bet_type": bet_type,
+            "location": location,
+            "result": result,
+            "won": won,
+        }
+        self.message = "The wheel is spinning..."
+        return result
+
+    def finish_spin(self):
+        if self.pending_spin is None:
+            raise RuntimeError("There is no roulette spin to finish.")
+
+        pending = self.pending_spin
+        bet = pending["bet"]
+        result = pending["result"]
+        won = pending["won"]
         self.player["chips"] -= bet
         if won:
-            winnings = payout(bet, bet_type)
+            winnings = payout(bet, pending["bet_type"])
             interest = collect_winnings_interest(self.player, winnings)
             net_winnings = winnings - interest
             self.player["chips"] += bet + net_winnings
@@ -287,6 +333,7 @@ class RouletteGame:
             self.message = f"It landed on {result}. You lost {bet} chips."
 
         self.last_spin = result
+        self.pending_spin = None
         return result
 
     @staticmethod

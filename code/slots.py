@@ -75,9 +75,9 @@ def spin_reels(player=None, silver_reel=False):
 
 def apply_fishing_rod(grid, player):
     if player is None or "Fishing Rod" not in player.get("temp_powerups", []):
-        return
+        return False
 
-    _, positions = random.choice(PAYLINES)
+    positions = PAYLINES[-2][1]
     symbol = random.choices(
         SYMBOLS,
         weights=symbol_weights(player),
@@ -88,10 +88,17 @@ def apply_fishing_rod(grid, player):
         grid[row][column] = symbol
 
     player["temp_powerups"].remove("Fishing Rod")
+    return True
 
-def get_payout(grid, bet):
+
+def get_payout(grid, bet, fishing_rod=False):
     total_payout = 0
     wins = []
+
+    if fishing_rod:
+        symbol = grid[1][1]
+        payout = bet * SYMBOL_MULTIPLIERS[symbol]
+        return payout, [("fishing_rod", symbol, payout)]
 
     if all(symbol == grid[0][0] for row in grid for symbol in row):
         symbol = grid[0][0]
@@ -126,27 +133,55 @@ class SlotsGame:
         self.wins = []
         self.last_payout = 0
         self.message = "Choose a bet, then spin."
+        self.pending_bet = None
 
     @property
     def chips(self):
         return self.player["chips"]
 
-    def spin(self, bet):
+    def start_spin(
+        self,
+        bet,
+        use_silver_reel=True,
+        use_fishing_rod=True,
+    ):
+        if self.pending_bet is not None:
+            raise RuntimeError("The reels are already spinning.")
         if not isinstance(bet, int) or isinstance(bet, bool):
             raise ValueError("Bet must be a whole number.")
         if not 1 <= bet <= self.chips:
             raise ValueError(f"Bet must be between 1 and {self.chips} chips.")
 
         temp_powerups = self.player["temp_powerups"]
-        silver_reel = "Silver Reel" in temp_powerups
+        silver_reel = (
+            use_silver_reel and "Silver Reel" in temp_powerups
+        )
         self.reels = spin_reels(self.player, silver_reel)
 
         if silver_reel:
             temp_powerups.remove("Silver Reel")
 
-        apply_fishing_rod(self.reels, self.player)
+        fishing_rod = (
+            apply_fishing_rod(self.reels, self.player)
+            if use_fishing_rod
+            else False
+        )
 
-        self.last_payout, self.wins = get_payout(self.reels, bet)
+        self.last_payout, self.wins = get_payout(
+            self.reels,
+            bet,
+            fishing_rod=fishing_rod,
+        )
+        self.pending_bet = bet
+        self.message = "Spinning..."
+        return self.reels, self.last_payout, self.wins
+
+    def finish_spin(self):
+        if self.pending_bet is None:
+            return False
+
+        bet = self.pending_bet
+        self.pending_bet = None
         self.player["chips"] -= bet
 
         if self.last_payout:
@@ -159,7 +194,21 @@ class SlotsGame:
         else:
             self.message = f"No win. You lost {bet} chips."
 
-        return self.reels, self.last_payout, self.wins
+        return True
+
+    def spin(
+        self,
+        bet,
+        use_silver_reel=True,
+        use_fishing_rod=True,
+    ):
+        result = self.start_spin(
+            bet,
+            use_silver_reel=use_silver_reel,
+            use_fishing_rod=use_fishing_rod,
+        )
+        self.finish_spin()
+        return result
 
 
 def get_bet(chips):
@@ -190,12 +239,12 @@ def play_slots(chips, player=None):
         if silver_reel:
             player["temp_powerups"].remove("Silver Reel")
 
-        apply_fishing_rod(reels, player)
+        fishing_rod = apply_fishing_rod(reels, player)
 
         for row in reels:
             print(" | ".join(f"{symbol:10}" for symbol in row))
 
-        payout, wins = get_payout(reels, bet)
+        payout, wins = get_payout(reels, bet, fishing_rod=fishing_rod)
         chips -= bet
 
         if payout:
@@ -203,6 +252,12 @@ def play_slots(chips, player=None):
             for line_type, symbol, line_payout in wins:
                 if line_type == "blackout":
                     print(f"Blackout! All nine symbols are {symbol}: {line_payout} chips.")
+                elif line_type == "fishing_rod":
+                    print(
+                        f"Fishing Rod diagonal: three {symbol}s, "
+                        f"{line_payout} chips."
+                    )
+                    continue
                 print(
                     f"Three {symbol}s on a {line_type} line: "
                     f"{line_payout} chips."

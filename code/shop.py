@@ -127,20 +127,27 @@ class ShopGame:
             raise ValueError("Quantity must be at least 1.")
 
         details = AVAILABLE_POWERUPS[name]
+        inventory_key = (
+            "perma_powerups" if details["type"] == "perma"
+            else "temp_powerups"
+        )
+        maximum = details.get(
+            "max_owned",
+            1 if details["type"] == "perma" else None,
+        )
+        owned = self.player[inventory_key].count(name)
+        if maximum is not None and owned + quantity > maximum:
+            raise ValueError(
+                f"You can own at most {maximum} {name}."
+            )
         if details["type"] == "perma":
             if quantity != 1:
                 raise ValueError("Permanent items can only be bought one at a time.")
-            if self.player["perma_powerups"].count(name) >= details.get("max_owned", 1):
-                raise ValueError("You already own this permanent item.")
 
         total_cost = details["price"] * quantity
         if total_cost > self.player["chips"]:
             raise ValueError(f"You need {total_cost} chips for that quantity.")
 
-        inventory_key = (
-            "perma_powerups" if details["type"] == "perma"
-            else "temp_powerups"
-        )
         self.player[inventory_key].extend([name] * quantity)
         self.player["chips"] -= total_cost
         return total_cost

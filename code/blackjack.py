@@ -69,6 +69,13 @@ class BlackjackGame:
         self.round_active = False
         self.message = "Enter a bet, then deal."
         self.bet = 0
+        self.marked_card = None
+
+    def _deal_marked_card(self):
+        card = deal_card(self.deck)
+        if card == self.marked_card:
+            self.marked_card = None
+        return card
 
     @property
     def chips(self):
@@ -120,7 +127,7 @@ class BlackjackGame:
             and self.total_wager + hand.bet <= self.chips
         )
 
-    def start_round(self, bet):
+    def start_round(self, bet, use_marked_deck=True):
         if self.round_active:
             raise RuntimeError("A Blackjack round is already active.")
         if not isinstance(bet, int) or isinstance(bet, bool):
@@ -147,14 +154,16 @@ class BlackjackGame:
         self.current_hand_index = 0
         self.round_active = True
         self.message = "Hit, stand, double, or split."
+        self.marked_card = None
 
-        if "Marked Deck" in self.player["temp_powerups"] and self.deck:
-            next_card = self.deck[-1]
+        if (
+            use_marked_deck
+            and "Marked Deck" in self.player["temp_powerups"]
+            and self.deck
+        ):
+            self.marked_card = self.deck[-1]
             self.player["temp_powerups"].remove("Marked Deck")
-            self.message = (
-                "Marked Deck reveals the next card: "
-                f"{card_rank(next_card)}{next_card[1]}."
-            )
+            self.message = "Marked Deck reveals the next card."
 
         if has_blackjack(self.hands[0].cards) or has_blackjack(self.dealer_hand):
             self._finish_round()
@@ -163,7 +172,7 @@ class BlackjackGame:
         if not self.can_hit:
             raise RuntimeError("Hit is not available for this hand.")
 
-        self.current_hand.cards.append(deal_card(self.deck))
+        self.current_hand.cards.append(self._deal_marked_card())
         if calc_hand_value(self.current_hand.cards) >= 21:
             self.advance_hand()
         else:
@@ -179,7 +188,7 @@ class BlackjackGame:
             raise RuntimeError("Double down is not available for this hand.")
 
         self.current_hand.bet *= 2
-        self.current_hand.cards.append(deal_card(self.deck))
+        self.current_hand.cards.append(self._deal_marked_card())
         self.advance_hand()
 
     def split(self):
@@ -189,8 +198,8 @@ class BlackjackGame:
         hand = self.current_hand
         first_card, second_card = hand.cards
         self.hands[self.current_hand_index:self.current_hand_index + 1] = [
-            PlayerHand([first_card, deal_card(self.deck)], hand.bet, True),
-            PlayerHand([second_card, deal_card(self.deck)], hand.bet, True),
+            PlayerHand([first_card, self._deal_marked_card()], hand.bet, True),
+            PlayerHand([second_card, self._deal_marked_card()], hand.bet, True),
         ]
 
         if calc_hand_value(self.current_hand.cards) >= 21:
@@ -226,7 +235,7 @@ class BlackjackGame:
 
         if can_draw_for_dealer and not dealer_blackjack:
             while calc_hand_value(self.dealer_hand) < 17 and self.deck:
-                self.dealer_hand.append(deal_card(self.deck))
+                self.dealer_hand.append(self._deal_marked_card())
 
         dealer_total = calc_hand_value(self.dealer_hand)
         net_change = 0

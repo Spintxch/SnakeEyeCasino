@@ -9,6 +9,20 @@ BIG_BLIND = 10
 RANKS = ("2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A")
 SUITS = ("♠", "♥", "♦", "♣")
 RANK_VALUES = {rank: value for value, rank in enumerate(RANKS, start=2)}
+BOT_NAMES = (
+    "Ace",
+    "Lucky Lou",
+    "Maverick",
+    "Ruby",
+    "The River",
+    "Chip",
+    "Daisy",
+    "Smokey",
+    "Jackpot",
+    "Roxy",
+    "Old Oak",
+    "Bluff King",
+)
 
 def make_deck():
     deck = [(rank, suit) for rank in RANKS for suit in SUITS]
@@ -39,13 +53,15 @@ def create_table(player_name, players, starting_chips):
         })
         used_names.add(name)
 
-    bot_number = 1
+    available_bot_names = [
+        name for name in BOT_NAMES
+        if name not in used_names
+    ]
+    random.shuffle(available_bot_names)
     while len(seats) < MAX_SEATS:
-        name = f"bot_{bot_number:03d}"
-        bot_number += 1
-
-        if name in used_names:
-            continue
+        if not available_bot_names:
+            raise ValueError("Not enough unique bot names to fill the table.")
+        name = available_bot_names.pop()
 
         seats.append({
             "name": name,
@@ -162,7 +178,8 @@ def choose_bot_action(seat, board, amount_to_call):
 
     if amount_to_call == 0:
         if strength >= 2 and seat["stack"] > BIG_BLIND:
-            if random.random() < 0.1:
+            raise_chance = 0.55 if strength >= 3 else 0.3
+            if random.random() < raise_chance:
                 return "raise"
         return "check"
 
@@ -173,7 +190,8 @@ def choose_bot_action(seat, board, amount_to_call):
         return "fold" if random.random() < 0.6 else "call"
 
     if strength >= 2 and seat["stack"] > amount_to_call + BIG_BLIND:
-        if random.random() < 0.1:
+        raise_chance = 0.5 if strength >= 3 else 0.25
+        if random.random() < raise_chance:
             return "raise"
 
     return "call"
@@ -318,7 +336,13 @@ def award_pot(seats, board, button, announce=True):
         previous = level
 
 class PokerRound:
-    def __init__(self, seats, previous_button, player=None):
+    def __init__(
+        self,
+        seats,
+        previous_button,
+        player=None,
+        use_lucky_cards=True,
+    ):
         self.seats = seats
         self.player = player
         self.button = previous_button
@@ -327,8 +351,11 @@ class PokerRound:
         self.street = 0
         self.current_bet = 0
         self.pending = []
+        self.small_blind_index = None
+        self.big_blind_index = None
         self.finished = False
         self.message = ""
+        self.last_action = "Hand started; blinds posted."
 
         active = [
             index for index, seat in enumerate(seats)
@@ -368,6 +395,8 @@ class PokerRound:
             small_blind_index,
             lambda seat: seat["stack"] > 0,
         )
+        self.small_blind_index = small_blind_index
+        self.big_blind_index = big_blind_index
 
         self.deck = make_deck()
         user_index = next(
@@ -375,7 +404,8 @@ class PokerRound:
             None,
         )
         has_lucky_cards = (
-            player is not None
+            use_lucky_cards
+            and player is not None
             and "Lucky Cards" in player.get("temp_powerups", [])
         )
         lucky_cards = None
@@ -455,7 +485,7 @@ class PokerRound:
     def _players_left(self):
         return sum(not seat["folded"] for seat in self.seats)
 
-    def act(self, action):
+    def act(self, action, raise_to=None):
         if self.finished or self.actor_index is None:
             raise RuntimeError("There is no player action to apply.")
 
@@ -469,21 +499,38 @@ class PokerRound:
         if action == "fold":
             seat["folded"] = True
             self.message = "You folded."
+            self.last_action = "You folded."
 
         elif action == "check":
             if amount_to_call:
                 raise ValueError("You cannot check while facing a bet.")
             self.message = "You checked."
+            self.last_action = "You checked."
 
         elif action == "call":
             post_chips(seat, amount_to_call)
             seat["all_in"] = seat["stack"] == 0
             self.message = "You called."
+            self.last_action = f"You called {amount_to_call}."
 
         elif action == "raise":
             if not self.can_raise:
                 raise ValueError("A raise is not available.")
-            post_chips(seat, amount_to_call + BIG_BLIND)
+            if raise_to is None:
+                raise_to = self.current_bet + BIG_BLIND
+            if not isinstance(raise_to, int) or isinstance(raise_to, bool):
+                raise ValueError("Raise amount must be a whole number.")
+            minimum_raise_to = self.current_bet + BIG_BLIND
+            maximum_raise_to = seat["street_bet"] + seat["stack"]
+            if raise_to < minimum_raise_to:
+                raise ValueError(
+                    f"Raise to at least {minimum_raise_to} chips."
+                )
+            if raise_to > maximum_raise_to:
+                raise ValueError(
+                    f"You can raise to at most {maximum_raise_to} chips."
+                )
+            post_chips(seat, raise_to - seat["street_bet"])
             seat["all_in"] = seat["stack"] == 0
             self.current_bet = seat["street_bet"]
             self.pending = [
@@ -493,6 +540,7 @@ class PokerRound:
                 and not self.seats[(index + offset) % len(self.seats)]["all_in"]
             ]
             self.message = "You raised."
+            self.last_action = f"You raised to {raise_to}."
 
         else:
             raise ValueError(f"Unknown poker action: {action}")
@@ -534,10 +582,16 @@ class PokerRound:
         if action == "fold":
             seat["folded"] = True
             self.message = f"{seat['name']} folded."
+            self.last_action = self.message
         elif action in ("check", "call"):
             post_chips(seat, amount_to_call)
             seat["all_in"] = seat["stack"] == 0
             self.message = f"{seat['name']} {action}ed."
+            self.last_action = (
+                f"{seat['name']} checked."
+                if action == "check"
+                else f"{seat['name']} called {amount_to_call}."
+            )
         elif action == "raise":
             post_chips(seat, amount_to_call + BIG_BLIND)
             seat["all_in"] = seat["stack"] == 0
@@ -549,6 +603,9 @@ class PokerRound:
                 and not self.seats[(index + offset) % len(self.seats)]["all_in"]
             ]
             self.message = f"{seat['name']} raised."
+            self.last_action = (
+                f"{seat['name']} raised to {seat['street_bet']}."
+            )
             return
 
         self.pending.pop(0)
@@ -617,7 +674,7 @@ class PokerGame:
             and not self.round.seats[actor_index]["is_bot"]
         )
 
-    def start_hand(self):
+    def start_hand(self, use_lucky_cards=True):
         if self.round is not None and not self.round.finished:
             return
         if self.player["chips"] <= 0:
@@ -629,16 +686,17 @@ class PokerGame:
             self.seats,
             self.previous_button,
             self.player,
+            use_lucky_cards=use_lucky_cards,
         )
         if self.round.button is not None:
             self.previous_button = self.round.button
         self._settled_round = None
         self.sync_player_chips()
 
-    def act(self, action):
+    def act(self, action, raise_to=None):
         if not self.is_player_turn:
             raise RuntimeError("It is not your turn.")
-        self.round.act(action)
+        self.round.act(action, raise_to=raise_to)
         self.sync_player_chips()
 
     def sync_player_chips(self):
